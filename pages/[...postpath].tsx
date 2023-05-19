@@ -1,112 +1,115 @@
-import React from 'react';
-import Head from 'next/head';
-import { GetServerSideProps } from 'next';
-import { GraphQLClient, gql } from 'graphql-request';
+<template>
+  <div class="post-container">
+    <h1>{{ post.title }}</h1>
+    <img :src="post.featuredImage.node.sourceUrl" :alt="post.featuredImage.node.altText || post.title" />
+    <article v-html="post.content" />
+  </div>
+</template>
 
-export const getServerSideProps: GetServerSideProps = async (ctx) => {
-	const endpoint = "https://news1x.live/graphql"
-	const graphQLClient = new GraphQLClient(endpoint);
-	const referringURL = ctx.req.headers?.referer || null;
-	const pathArr = ctx.query.postpath as Array<string>;
-	const path = pathArr.join('/');
-	console.log(path);
-	const fbclid = ctx.query.fbclid;
-
-	// redirect if facebook is the referer or request contains fbclid
-		if (referringURL?.includes('facebook.com') || fbclid) {
-
-		return {
-			redirect: {
-				permanent: false,
-				destination: `${
-					`https://news1x.live/` + encodeURI(path as string)
-				}`,
-			},
-		};
-		}
-	const query = gql`
-		{
-			post(id: "/${path}/", idType: URI) {
-				id
-				excerpt
-				title
-				link
-				dateGmt
-				modifiedGmt
-				content
-				author {
-					node {
-						name
-					}
-				}
-				featuredImage {
-					node {
-						sourceUrl
-						altText
-					}
-				}
-			}
-		}
-	`;
-
-	const data = await graphQLClient.request(query);
-	if (!data.post) {
-		return {
-			notFound: true,
-		};
-	}
-	return {
-		props: {
-			path,
-			post: data.post,
-			host: ctx.req.headers.host,
-		},
-	};
-};
+<script lang="ts">
+import { defineComponent } from '@nuxtjs/composition-api';
+import { GetServerSidePropsContext } from 'nuxt';
 
 interface PostProps {
-	post: any;
-	host: string;
-	path: string;
+  post: {
+    title: string;
+    excerpt: string;
+    featuredImage: {
+      node: {
+        sourceUrl: string;
+        altText: string;
+      };
+    };
+    content: string;
+    dateGmt: string;
+    modifiedGmt: string;
+  };
+  host: string;
+  path: string;
 }
 
-const Post: React.FC<PostProps> = (props) => {
-	const { post, host, path } = props;
+export default defineComponent({
+  async asyncData({ req, params }: GetServerSidePropsContext) {
+    const endpoint = 'https://news1x.live/graphql';
+    const referringURL = req.headers?.referer || null;
+    const pathArr = params?.postpath as string[];
+    const path = pathArr.join('/');
+    console.log(path);
+    const fbclid = req.query?.fbclid;
 
-	// to remove tags from excerpt
-	const removeTags = (str: string) => {
-		if (str === null || str === '') return '';
-		else str = str.toString();
-		return str.replace(/(<([^>]+)>)/gi, '').replace(/\[[^\]]*\]/, '');
-	};
+    // redirect if facebook is the referer or request contains fbclid
+    if (referringURL?.includes('facebook.com') || fbclid) {
+      return {
+        redirect: {
+          path: `/${encodeURI(path)}`,
+          statusCode: 302,
+        },
+      };
+    }
 
-	return (
-		<>
-			<Head>
-				<meta property="og:title" content={post.title} />
-				<meta property="og:description" content={removeTags(post.excerpt)} />
-				<meta property="og:type" content="article" />
-				<meta property="og:locale" content="en_US" />
-				<meta property="og:site_name" content={host.split('.')[0]} />
-				<meta property="article:published_time" content={post.dateGmt} />
-				<meta property="article:modified_time" content={post.modifiedGmt} />
-				<meta property="og:image" content={post.featuredImage.node.sourceUrl} />
-				<meta
-					property="og:image:alt"
-					content={post.featuredImage.node.altText || post.title}
-				/>
-				<title>{post.title}</title>
-			</Head>
-			<div className="post-container">
-				<h1>{post.title}</h1>
-				<img
-					src={post.featuredImage.node.sourceUrl}
-					alt={post.featuredImage.node.altText || post.title}
-				/>
-				<article dangerouslySetInnerHTML={{ __html: post.content }} />
-			</div>
-		</>
-	);
-};
+    const graphQLClient = new GraphQLClient(endpoint);
+    const query = `
+      {
+        post(id: "/${path}/", idType: URI) {
+          title
+          excerpt
+          featuredImage {
+            node {
+              sourceUrl
+              altText
+            }
+          }
+          content
+          dateGmt
+          modifiedGmt
+        }
+      }
+    `;
 
-export default Post;
+    try {
+      const { post } = await graphQLClient.request(query);
+
+      if (!post) {
+        return {
+          notFound: true,
+        };
+      }
+
+      return {
+        post,
+        host: req.headers.host,
+        path,
+      };
+    } catch (error) {
+      console.error('GraphQL request error:', error);
+      return {
+        notFound: true,
+      };
+    }
+  },
+
+  head() {
+    return {
+      title: this.post.title,
+      meta: [
+        { property: 'og:title', content: this.post.title },
+        { property: 'og:description', content: this.removeTags(this.post.excerpt) },
+        { property: 'og:type', content: 'article' },
+        { property: 'og:locale', content: 'en_US' },
+        { property: 'og:site_name', content: this.host.split('.')[0] },
+        { property: 'article:published_time', content: this.post.dateGmt },
+        { property: 'article:modified_time', content: this.post.modifiedGmt },
+        { property: 'og:image', content: this.post.featuredImage.node.sourceUrl },
+        { property: 'og:image:alt', content: this.post.featuredImage.node.altText || this.post.title },
+      ],
+    };
+  },
+
+  methods: {
+    removeTags(str: string) {
+      if (!str) return '';
+      return str.replace(/(<([^>]+)>)/gi, '').replace(/\[[^\]]*\]/, '');
+    },
+  },
+});
+</script>
